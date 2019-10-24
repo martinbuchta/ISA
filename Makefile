@@ -1,12 +1,12 @@
 CPP=g++
-CPPFLAGS=-std=c++17 -pedantic -Wall -Wextra
+CPPFLAGS=-std=c++17 -pedantic -Wall -Wextra -lpcap
 
 .PHONY: clear
 
 all: d6r
 
 d6r: main.cc
-	$(CPP) $(CPPFLAGS) main.cc -o d6r
+	$(CPP) main.cc -o d6r $(CPPFLAGS)
 
 zip: *.c *.h *.cc Makefile
 	zip xbucht28.zip *.cc *.h Makefile
