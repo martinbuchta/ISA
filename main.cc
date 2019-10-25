@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <iostream>
 #include <pcap.h>
+#include <net/ethernet.h>
+#include <string.h>
 
 using namespace std;
 
@@ -30,6 +32,22 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
     static int count = 1;
 
     printf("\nPacket number [%d], length of this packet is: %d\n", count++, pkthdr->len);
+
+    /**
+     * ethernet header
+     */
+
+    struct ether_header ethernet_header;
+    memcpy(&ethernet_header, packet, sizeof(struct ether_header));
+
+    printf("Dest: ");
+    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_dhost[0], ethernet_header.ether_dhost[1], 
+    ethernet_header.ether_dhost[2], ethernet_header.ether_dhost[3], ethernet_header.ether_dhost[4], ethernet_header.ether_dhost[5]);
+    
+    printf("Source: ");
+    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1], 
+    ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
+
 }
 
 int main()
