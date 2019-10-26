@@ -1,5 +1,5 @@
 CPP=g++
-CPPFLAGS=-std=c++17 -Wextra -lpcap
+CPPFLAGS=-std=c++17 -Wextra -lpcap -g
 
 .PHONY: clear
 

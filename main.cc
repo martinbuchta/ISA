@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/udp.h>
 
 using namespace std;
 
@@ -73,6 +74,13 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
     if (ip_header.next_header != 17) { // TODO
         printf("Oh, this should never happen :( \n Next header should be UDP, but isn't.\n");
     }
+
+    const struct udphdr *udp_header;
+    udp_header = (struct udphdr *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header));
+    printf("--------- UDP ---------\n");
+    printf("Source: %d\n", ntohs(udp_header->uh_sport));
+    printf("Dest: %d\n", ntohs(udp_header->uh_dport));
+    printf("Length: %d\n", ntohs(udp_header->uh_ulen));
 }
 
 int main()
