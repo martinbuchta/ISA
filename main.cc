@@ -41,13 +41,12 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
     memcpy(&ethernet_header, packet, sizeof(struct ether_header));
 
     printf("Dest: ");
-    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_dhost[0], ethernet_header.ether_dhost[1], 
-    ethernet_header.ether_dhost[2], ethernet_header.ether_dhost[3], ethernet_header.ether_dhost[4], ethernet_header.ether_dhost[5]);
-    
-    printf("Source: ");
-    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1], 
-    ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
+    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_dhost[0], ethernet_header.ether_dhost[1],
+           ethernet_header.ether_dhost[2], ethernet_header.ether_dhost[3], ethernet_header.ether_dhost[4], ethernet_header.ether_dhost[5]);
 
+    printf("Source: ");
+    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
+           ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
 }
 
 int main()
@@ -63,7 +62,7 @@ int main()
 
     pcap_lookupnet(interface, &pNet, &pMask, errbuf);
 
-    pcap_t *descr = pcap_open_live(interface, BUFSIZ, 0, -1, errbuf);
+    pcap_t *descr = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
     if (descr == NULL)
     {
         printf("pcap_open_live() failed due to [%s]\n", errbuf);
