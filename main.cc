@@ -81,6 +81,16 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
     printf("Source: %d\n", ntohs(udp_header->uh_sport));
     printf("Dest: %d\n", ntohs(udp_header->uh_dport));
     printf("Length: %d\n", ntohs(udp_header->uh_ulen));
+
+    printf("---- zkousim stesti DHCP ----");
+    const u_char *dhcpMshType = packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr);
+    const uint8_t msgType = *dhcpMshType;
+    printf("Msg-Type: %d\n", msgType);
+
+    if (msgType == 1) {
+        printf("I have a SOLICIT (1) message.\n");
+        
+    }
 }
 
 int main()
