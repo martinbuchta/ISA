@@ -8,6 +8,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/udp.h>
+#include <netinet/in.h>
+#include <ifaddrs.h>
 
 using namespace std;
 
@@ -23,6 +25,17 @@ struct ipv6_header
     struct in6_addr src;
     struct in6_addr dst;
 };
+
+struct dhcpv6_relay_server_message
+{
+    uint8_t msgType;
+    uint8_t hopCount;
+    struct in6_addr link_addr;
+    struct in6_addr peer_addr;
+    uint8_t options[];
+};
+
+char *interface;
 
 /**
  * Get name of the first non-loopback device.
@@ -42,6 +55,78 @@ char *getFirstDevice()
     }
 
     return dev;
+}
+
+/**
+ * This function is insiped by https://stackoverflow.com/a/33127330
+ */
+struct in6_addr getIp6OfInterface()
+{
+    struct in6_addr toReturn;
+    struct ifaddrs *ifa, *ifa_tmp;
+    char addr[50];
+
+    if (getifaddrs(&ifa) == -1) {
+        perror("getifaddrs failed");
+        exit(1);
+    }
+
+    ifa_tmp = ifa;
+    struct sockaddr_in6 *in6;
+
+    while (ifa_tmp) {
+        if ((ifa_tmp->ifa_addr) && ((ifa_tmp->ifa_addr->sa_family == AF_INET) ||
+                                (ifa_tmp->ifa_addr->sa_family == AF_INET6))) {
+            if (ifa_tmp->ifa_addr->sa_family == AF_INET) {
+                // create IPv4 string
+                struct sockaddr_in *in = (struct sockaddr_in*) ifa_tmp->ifa_addr;
+                inet_ntop(AF_INET, &in->sin_addr, addr, sizeof(addr));
+            } else { // AF_INET6
+                // create IPv6 string
+                in6 = (struct sockaddr_in6*) ifa_tmp->ifa_addr;
+                inet_ntop(AF_INET6, &in6->sin6_addr, addr, sizeof(addr));
+            }
+
+            if (strcmp(interface, ifa_tmp->ifa_name) == 0  && ifa_tmp->ifa_addr->sa_family == AF_INET6) {
+                printf("\nname = %s\n", ifa_tmp->ifa_name);
+                printf("addr = %s\n", addr);
+                return in6->sin6_addr;
+            }
+        }
+        ifa_tmp = ifa_tmp->ifa_next;
+    }
+
+    return toReturn;
+}
+
+void sendUdpForward(char *data, size_t length)
+{
+    int sockfd;
+    if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) { 
+        perror("socket creation failed"); 
+        exit(EXIT_FAILURE); 
+    } else {
+        printf("Socket created\n");
+    } 
+
+    struct sockaddr_in6     servaddr; 
+    memset(&servaddr, 0, sizeof(servaddr)); 
+      
+    // Filling server information 
+    servaddr.sin6_family = AF_INET6; 
+    servaddr.sin6_port = htons(547); 
+    inet_pton(AF_INET6, "2001:67c:1220:80c::93e5:dd2", &servaddr.sin6_addr);
+      
+
+    if( sendto(sockfd, (const char *)data, length, 
+        MSG_CONFIRM, (const struct sockaddr *) &servaddr,  
+            sizeof(servaddr)) <0 ) {
+        /* buffers aren't available locally at the moment,
+        * try again.
+        */
+        perror("UDP err");
+        exit(1);
+    }
 }
 
 void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet)
@@ -89,7 +174,18 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
 
     if (msgType == 1) {
         printf("I have a SOLICIT (1) message.\n");
+        printf("For relay rofward message alloc %d bytes\n", 34 + ntohs(udp_header->uh_ulen) - 8);
+
+        // create relay forward message
         
+        struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) malloc(34 + ntohs(udp_header->uh_ulen) - 8);
+        msg->msgType = 12;
+        msg->hopCount = 0;
+        msg->link_addr = getIp6OfInterface();
+        msg->peer_addr = ip_header.src;
+        memcpy(&(msg->options), dhcpMshType, ntohs(udp_header->uh_ulen) - 8);
+
+        sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8);
     }
 }
 
@@ -101,7 +197,7 @@ int main()
     bpf_u_int32 pNet;  /* ip address*/
     cout << "Hello world!\n";
 
-    char *interface = getFirstDevice();
+    interface = getFirstDevice();
     printf("Device: %s\n", interface);
 
     pcap_lookupnet(interface, &pNet, &pMask, errbuf);
