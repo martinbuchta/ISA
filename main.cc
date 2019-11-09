@@ -10,6 +10,7 @@
 #include <netinet/udp.h>
 #include <netinet/in.h>
 #include <ifaddrs.h>
+#include <cstdint>
 
 using namespace std;
 
@@ -26,13 +27,28 @@ struct ipv6_header
     struct in6_addr dst;
 };
 
-struct dhcpv6_relay_server_message
+struct __attribute__((__packed__)) dhcpv6_relay_server_message
 {
     uint8_t msgType;
     uint8_t hopCount;
     struct in6_addr link_addr;
     struct in6_addr peer_addr;
     uint8_t options[];
+};
+
+struct __attribute__((__packed__)) option
+{
+    uint8_t option_code[2];
+    uint8_t option_length[2];
+    uint8_t option_data[];
+};
+
+struct __attribute__((__packed__)) mac_option
+{
+    uint8_t option_code[2];
+    uint8_t option_length[2];
+    uint8_t link_layer_type[2];
+    uint8_t link_layer_addr[];
 };
 
 char *interface;
@@ -174,18 +190,32 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
 
     if (msgType == 1) {
         printf("I have a SOLICIT (1) message.\n");
-        printf("For relay rofward message alloc %d bytes\n", 34 + ntohs(udp_header->uh_ulen) - 8);
+        printf("For relay rofward message alloc %d bytes\n", 34 + ntohs(udp_header->uh_ulen) - 8 + 12);
 
         // create relay forward message
         
-        struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) malloc(34 + ntohs(udp_header->uh_ulen) - 8);
+        struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) malloc(
+            (34 + ntohs(udp_header->uh_ulen) - 8) + (12) );
         msg->msgType = 12;
         msg->hopCount = 0;
         msg->link_addr = getIp6OfInterface();
         msg->peer_addr = ip_header.src;
-        memcpy(&(msg->options), dhcpMshType, ntohs(udp_header->uh_ulen) - 8);
 
-        sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8);
+        struct option *relay_message_option = (struct option *) &(msg->options);
+        relay_message_option->option_code[1] = 9;
+        relay_message_option->option_length[1] = ntohs(udp_header->uh_ulen) - 8;
+        memcpy(&(relay_message_option->option_data), dhcpMshType, ntohs(udp_header->uh_ulen) - 8);
+
+        char *macOptionAddr = (char *) &(msg->options);
+        macOptionAddr += ntohs(udp_header->uh_ulen) - 8 + 4;
+        struct mac_option *macOption = (struct mac_option *) macOptionAddr;
+        macOption->option_code[1] = 79;
+        macOption->option_length[0] = 0;
+        macOption->option_length[1] = 8;
+        macOption->link_layer_type[1] = 1;
+        memcpy(&(macOption->link_layer_addr), &(ethernet_header.ether_shost), 8);
+
+        sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4);
     }
 }
 
