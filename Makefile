@@ -8,6 +8,10 @@ all: d6r
 d6r: main.cc
 	$(CPP) main.cc -o d6r $(CPPFLAGS)
 
+run:
+	make all
+	./d6r
+
 zip: *.c *.h *.cc Makefile
 	zip xbucht28.zip *.cc *.h Makefile
 

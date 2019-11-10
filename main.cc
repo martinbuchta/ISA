@@ -80,17 +80,7 @@ char *getFirstDevice()
  */
 struct in6_addr getIp6OfInterface()
 {
-    in6_addr ip;
-    unsigned char *ipA = (unsigned char *) &ip;
-    ipA[0] = 0x20;
-    ipA[1] = 0x01;
-    ipA[2] = 0x0d;
-    ipA[3] = 0xb8;
-    ipA[4] = 0x01;
-    ipA[5] = 0x5a;
-    memset(&(ipA[6]), 0, 9);
-    ipA[15] = 0x01;
-    return ip;
+
 
     struct in6_addr toReturn;
     struct ifaddrs *ifa, *ifa_tmp;
@@ -146,7 +136,6 @@ void sendUdpForward(char *data, size_t length)
     servaddr.sin6_family = AF_INET6; 
     servaddr.sin6_port = htons(547); 
     inet_pton(AF_INET6, "2001:67c:1220:80c::93e5:dd2", &servaddr.sin6_addr);
-      
 
     if( sendto(sockfd, (const char *)data, length, 
         MSG_CONFIRM, (const struct sockaddr *) &servaddr,  
@@ -209,7 +198,9 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
         // create relay forward message
         
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) malloc(
-            (34 + ntohs(udp_header->uh_ulen) - 8) + (12) );
+            (34 + ntohs(udp_header->uh_ulen) - 8) + (12) + 100); // 100 bytu alokuju navic, abych se pojistil, ze omylem neprepisu data od klihovny c pro spravu pameti
+
+        printf("malloc ok\n");
         msg->msgType = 12;
         msg->hopCount = 0;
         msg->link_addr = getIp6OfInterface();
@@ -232,9 +223,11 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
         macOption->link_layer_type[1] = 1;
         memcpy(&(macOption->link_layer_addr), &(ethernet_header.ether_shost), 6);
 
-        if (macOption->link_layer_addr[5] == 0x54) {
+        //if (macOption->link_layer_addr[5] == 0x54) {
             sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4);
-        }
+        //}
+
+        free(msg);
     }
 }
 
