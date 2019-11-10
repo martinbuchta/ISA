@@ -70,6 +70,8 @@ char *getFirstDevice()
         exit(1);
     }
 
+    dev = "enp4s0f1";
+
     return dev;
 }
 
@@ -112,7 +114,7 @@ struct in6_addr getIp6OfInterface()
         ifa_tmp = ifa_tmp->ifa_next;
     }
 
-    return toReturn;
+    return in6->sin6_addr;
 }
 
 void sendUdpForward(char *data, size_t length)
@@ -202,6 +204,7 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
         msg->peer_addr = ip_header.src;
 
         struct option *relay_message_option = (struct option *) &(msg->options);
+        relay_message_option->option_code[0] = 0;
         relay_message_option->option_code[1] = 9;
         relay_message_option->option_length[1] = ntohs(udp_header->uh_ulen) - 8;
         memcpy(&(relay_message_option->option_data), dhcpMshType, ntohs(udp_header->uh_ulen) - 8);
@@ -209,13 +212,17 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
         char *macOptionAddr = (char *) &(msg->options);
         macOptionAddr += ntohs(udp_header->uh_ulen) - 8 + 4;
         struct mac_option *macOption = (struct mac_option *) macOptionAddr;
+        macOption->option_code[0] = 0;
         macOption->option_code[1] = 79;
         macOption->option_length[0] = 0;
         macOption->option_length[1] = 8;
+        macOption->link_layer_type[0] = 0;
         macOption->link_layer_type[1] = 1;
-        memcpy(&(macOption->link_layer_addr), &(ethernet_header.ether_shost), 8);
+        memcpy(&(macOption->link_layer_addr), &(ethernet_header.ether_shost), 6);
 
-        sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4);
+        if (macOption->link_layer_addr[5] == 0x54) {
+            sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4);
+        }
     }
 }
 
