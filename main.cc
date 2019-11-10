@@ -80,6 +80,18 @@ char *getFirstDevice()
  */
 struct in6_addr getIp6OfInterface()
 {
+    in6_addr ip;
+    unsigned char *ipA = (unsigned char *) &ip;
+    ipA[0] = 0x20;
+    ipA[1] = 0x01;
+    ipA[2] = 0x0d;
+    ipA[3] = 0xb8;
+    ipA[4] = 0x01;
+    ipA[5] = 0x5a;
+    memset(&(ipA[6]), 0, 9);
+    ipA[15] = 0x01;
+    return ip;
+
     struct in6_addr toReturn;
     struct ifaddrs *ifa, *ifa_tmp;
     char addr[50];
