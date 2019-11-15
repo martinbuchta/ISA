@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <thread>
+#include <vector>
 
 using namespace std;
 
@@ -30,6 +32,13 @@ struct ipv6_header
     uint8_t  hop_limit;
     struct in6_addr src;
     struct in6_addr dst;
+};
+
+struct ipv6_header_option
+{
+    uint8_t next_header;
+    uint8_t length;
+    uint8_t data[];
 };
 
 struct __attribute__((__packed__)) dhcpv6_relay_server_message
@@ -56,7 +65,7 @@ struct __attribute__((__packed__)) mac_option
     uint8_t link_layer_addr[];
 };
 
-char *interface;
+char currentInterface[1000];
 
 /**
  * Get name of the first non-loopback device.
@@ -81,9 +90,8 @@ char *getFirstDevice()
 /**
  * This function is insiped by https://stackoverflow.com/a/33127330
  */
-struct in6_addr getIp6OfInterface()
+struct in6_addr getIp6OfInterface(char *interface)
 {
-
 
     struct in6_addr toReturn;
     struct ifaddrs *ifa, *ifa_tmp;
@@ -111,8 +119,8 @@ struct in6_addr getIp6OfInterface()
             }
 
             if (strcmp(interface, ifa_tmp->ifa_name) == 0  && ifa_tmp->ifa_addr->sa_family == AF_INET6) {
-                //printf("\nname = %s\n", ifa_tmp->ifa_name);
-                //printf("addr = %s\n", addr);
+                printf("\nname = %s\n", ifa_tmp->ifa_name);
+                printf("addr = %s\n", addr);
                 return in6->sin6_addr;
             }
         }
@@ -164,13 +172,13 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
     }
 
     // bind to interface
-    struct ifreq ifr;
+    /*struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "vboxnet0");
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), currentInterface);
     if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
         fprintf(stderr, "Can't bind socket to interface\n");
         exit(13);
-    }
+    }*/
 
 
     // bind source ip
@@ -198,7 +206,7 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
         exit(1);
     }
 
-    printf("RELY REPLY sent\n");
+    printf("RELY REPLY sent to interface %s\n", currentInterface);
 }
 
 void callbackServer(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet)
@@ -240,6 +248,8 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
     useless = NULL;
     static int count = 1;
 
+    size_t ipv6OptionsLen = 0;
+
     //printf("\nPacket number [%d], length of this packet is: %d\n", count++, pkthdr->len);
 
     /**
@@ -255,47 +265,64 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
            ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
     printf("Dest: ");
     printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_dhost[0], ethernet_header.ether_dhost[1],
-           ethernet_header.ether_dhost[2], ethernet_header.ether_dhost[3], ethernet_header.ether_dhost[4], ethernet_header.ether_dhost[5]);*/
-
+           ethernet_header.ether_dhost[2], ethernet_header.ether_dhost[3], ethernet_header.ether_dhost[4], ethernet_header.ether_dhost[5]);
+    */
     struct ipv6_header ip_header;
     memcpy(&ip_header, packet + sizeof(struct ether_header), sizeof(struct ipv6_header));
     /*printf("--------- IPv6 ---------\n");
+    printf("ip version %d\n", ip_header.version);
     printf("Next header: %u\n", ip_header.next_header);*/
 
-    if (ip_header.next_header != 17) { // TODO
-        printf("Oh, this should never happen :( \n Next header should be UDP, but isn't.\n");
+    if (ip_header.next_header != 17) {
+        struct ipv6_header_option *option = (struct ipv6_header_option *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + ipv6OptionsLen);
+
+        while (option->next_header != 17 && ipv6OptionsLen < 1500) {
+            ipv6OptionsLen += option->length + 8;
+            option = (struct ipv6_header_option *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + ipv6OptionsLen);
+        }
+
+        if (option->next_header != 17) {
+            // udp header not found
+            printf("Udp header not found\n");
+            return;
+        }
     }
+
+    printf("found\n");
 
     const struct udphdr *udp_header;
     udp_header = (struct udphdr *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header));
     /*printf("--------- UDP ---------\n");
     printf("Source: %d\n", ntohs(udp_header->uh_sport));
     printf("Dest: %d\n", ntohs(udp_header->uh_dport));
-    printf("Length: %d\n", ntohs(udp_header->uh_ulen));
+    printf("Length: %d\n", ntohs(udp_header->uh_ulen));*/
 
-    printf("---- zkousim stesti DHCP ----");*/
+    //printf("---- zkousim stesti DHCP ----");
     const u_char *dhcpMshType = packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr);
     const uint8_t msgType = *dhcpMshType;
-    printf("Msg-Type: %d\n", msgType);
+    //printf("Msg-Type: %d\n", msgType);
 
-    if (msgType == 1) {
+    if (msgType == 1 || msgType == 3) {
         /*printf("I have a SOLICIT (1) message.\n");
         printf("For relay rofward message alloc %d bytes\n", 34 + ntohs(udp_header->uh_ulen) - 8 + 12);*/
 
         // create relay forward message
         
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) malloc(
-            (34 + ntohs(udp_header->uh_ulen) - 8) + (12) + 100); // 100 bytu alokuju navic, abych se pojistil, ze omylem neprepisu data od klihovny c pro spravu pameti
+            (34 + ntohs(udp_header->uh_ulen) - 8) + (12) + 100
+            + 4 + strlen(currentInterface)
+        ); // 100 bytu alokuju navic, abych se pojistil, ze omylem neprepisu data od klihovny c pro spravu pameti
 
         //printf("malloc ok\n");
         msg->msgType = 12;
         msg->hopCount = 0;
-        msg->link_addr = getIp6OfInterface();
+        msg->link_addr = getIp6OfInterface(currentInterface);
         msg->peer_addr = ip_header.src;
 
         struct option *relay_message_option = (struct option *) &(msg->options);
         relay_message_option->option_code[0] = 0;
         relay_message_option->option_code[1] = 9;
+        relay_message_option->option_length[0] = 0;
         relay_message_option->option_length[1] = ntohs(udp_header->uh_ulen) - 8;
         memcpy(&(relay_message_option->option_data), dhcpMshType, ntohs(udp_header->uh_ulen) - 8);
 
@@ -310,12 +337,54 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
         macOption->link_layer_type[1] = 1;
         memcpy(&(macOption->link_layer_addr), &(ethernet_header.ether_shost), 6);
 
-        //if (macOption->link_layer_addr[5] == 0x54) {
-            sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4);
+        char *interfaceIdOptionAddr = (char *) &(msg->options);
+        interfaceIdOptionAddr += ntohs(udp_header->uh_ulen) - 8 + 4 + 12;
+        struct option *interfaceIdOption = (struct option *) interfaceIdOptionAddr;
+        interfaceIdOption->option_code[0] = 0;
+        interfaceIdOption->option_code[1] = 18;
+        interfaceIdOption->option_length[0] = 0;
+        interfaceIdOption->option_length[1] = strlen(currentInterface);
+        memcpy(&(interfaceIdOption->option_data), currentInterface, strlen(currentInterface));
+
+        printf("================ interface %s\n\n\n", currentInterface);
+
+                //if (macOption->link_layer_addr[5] == 0x54) {
+            sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4 + 4 + strlen(currentInterface));
         //}
 
         free(msg);
     }
+}
+
+void sniffInterface(char *interface)
+{
+    strcpy(currentInterface, interface);
+
+    char errbuf[PCAP_ERRBUF_SIZE];
+    struct bpf_program fp;
+    bpf_u_int32 pMask; /* subnet mask */
+    bpf_u_int32 pNet;  /* ip address*/
+    printf("Device: %s\n", interface);
+
+    pcap_lookupnet(interface, &pNet, &pMask, errbuf);
+
+    pcap_t *descr = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
+    if (descr == NULL) {
+        return;
+    }
+
+    // Compile the filter expression
+    if (pcap_compile(descr, &fp, "port 547", 0, pNet) == -1) {
+        return;
+    }
+
+    // Set the filter compiled above
+    if (pcap_setfilter(descr, &fp) == -1) {
+        printf("\npcap_setfilter() failed\n");
+        exit(1);
+    }
+
+    pcap_loop(descr, 1500, callback, NULL);
 }
 
 int main()
@@ -325,10 +394,11 @@ int main()
     bpf_u_int32 pMask; /* subnet mask */
     bpf_u_int32 pNet;  /* ip address*/
     cout << "Hello world!\n";
+    char *interface;
 
     if (fork() == 0) {
         // sniffing interface that comunicates with server
-        interface = "enp4s0f1";
+        interface = (char *) "enp4s0f1";
         printf("Device: %s\n", interface);
 
         pcap_lookupnet(interface, &pNet, &pMask, errbuf);
@@ -353,30 +423,24 @@ int main()
 
         pcap_loop(descr, 1500, callbackServer, NULL);
     } else {
-        interface = "vboxnet0";
-        printf("Device: %s\n", interface);
-
-        pcap_lookupnet(interface, &pNet, &pMask, errbuf);
-
-        pcap_t *descr = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
-        if (descr == NULL) {
-            printf("pcap_open_live() failed due to [%s]\n", errbuf);
-            return -1;
+        pcap_if_t *interfaces;
+        char errbuf[PCAP_ERRBUF_SIZE];
+        if (pcap_findalldevs(&interfaces,errbuf) == -1) {
+            fprintf(stderr, "Couldnt find any device.\n");
         }
 
-        // Compile the filter expression
-        if (pcap_compile(descr, &fp, "port 547", 0, pNet) == -1) {
-            printf("\npcap_compile() failed\n");
-            return -1;
+        int i = 0;
+
+        while (interfaces != nullptr) {
+            if (fork() == 0) {
+                sniffInterface(interfaces->name);
+                return 0;
+            }
+            i++;
+            interfaces = interfaces->next;
         }
 
-        // Set the filter compiled above
-        if (pcap_setfilter(descr, &fp) == -1) {
-            printf("\npcap_setfilter() failed\n");
-            exit(1);
-        }
-
-        pcap_loop(descr, 1500, callback, NULL);
+        while(1);
     }
 
     //pcap_loop();
