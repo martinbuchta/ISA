@@ -119,8 +119,8 @@ struct in6_addr getIp6OfInterface(char *interface)
             }
 
             if (strcmp(interface, ifa_tmp->ifa_name) == 0  && ifa_tmp->ifa_addr->sa_family == AF_INET6) {
-                printf("\nname = %s\n", ifa_tmp->ifa_name);
-                printf("addr = %s\n", addr);
+                //printf("\nname = %s\n", ifa_tmp->ifa_name);
+                //printf("addr = %s\n", addr);
                 return in6->sin6_addr;
             }
         }
@@ -158,10 +158,10 @@ void sendUdpForward(char *data, size_t length)
         exit(1);
     }
 
-    printf("RELY FORWARD sent\n");
+    //printf("RELY FORWARD sent\n");
 }
 
-void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, struct in6_addr linkAddr)
+void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, struct in6_addr linkAddr, char *interface)
 {
     int sockfd;
     if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) {
@@ -172,13 +172,13 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
     }
 
     // bind to interface
-    /*struct ifreq ifr;
+    struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), currentInterface);
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), interface);
     if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) < 0) {
         fprintf(stderr, "Can't bind socket to interface\n");
         exit(13);
-    }*/
+    }
 
 
     // bind source ip
@@ -206,7 +206,7 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
         exit(1);
     }
 
-    printf("RELY REPLY sent to interface %s\n", currentInterface);
+    printf("RELY REPLY sent to interface %s\n", interface);
 }
 
 void callbackServer(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet)
@@ -223,22 +223,53 @@ void callbackServer(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_c
 
     const struct udphdr *udp_header;
     udp_header = (struct udphdr *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header));
+    uint16_t packetLength = ntohs(udp_header->len);
 
     const u_char *dhcpMshType = packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr);
     const uint8_t msgType = *dhcpMshType;
 
     if (msgType == 13) {
-        printf("I have rely reply (13) message\n");
+        //printf("I have rely reply (13) message\n");
 
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) dhcpMshType;
-        struct option *opt = (struct option *) &(msg->options);
+        char interface[1000];
+        uint8_t *msgPtr = nullptr;
+        size_t msgSize = 0;
 
-        if (opt->option_code[1] != 9) { // relay msg
-            fprintf(stderr, "This should never happen!\n"); // TODO
-            exit(12);
+        struct option *opt;
+        uint16_t move = 0;
+
+        unsigned int usedOptions = 0;
+
+        while (packetLength > 8 + 34 + move) {
+            printf("%d > %d\n", packetLength, 8 + 34 + move);
+            opt = (struct option *) ((char *) &(msg->options) + move);
+
+            printf("code %d, lenth %d, ", opt->option_code[1], opt->option_code[1]);
+
+            if (opt->option_code[1] == 9) {
+                msgPtr = opt->option_data;
+                msgSize = opt->option_length[1];
+                usedOptions++;
+            }
+
+            if (opt->option_code[1] == 18) {
+                memcpy(interface, opt->option_data, opt->option_length[1]);
+                interface[opt->option_length[1]] = '\0';
+
+                usedOptions++;
+            }
+
+            move += opt->option_length[1] + 4;
         }
 
-        sendUdpReply(opt->option_data, opt->option_length[1], msg->peer_addr, msg->link_addr);
+        if (usedOptions < 2) {
+            return;
+        }
+
+        printf("\n\n========================================\n\n");
+
+        sendUdpReply(msgPtr, msgSize, msg->peer_addr, msg->link_addr, interface);
     }
 }
 
@@ -283,12 +314,12 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
 
         if (option->next_header != 17) {
             // udp header not found
-            printf("Udp header not found\n");
+            //printf("Udp header not found\n");
             return;
         }
     }
 
-    printf("found\n");
+    //printf("found\n");
 
     const struct udphdr *udp_header;
     udp_header = (struct udphdr *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header));
@@ -346,7 +377,7 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
         interfaceIdOption->option_length[1] = strlen(currentInterface);
         memcpy(&(interfaceIdOption->option_data), currentInterface, strlen(currentInterface));
 
-        printf("================ interface %s\n\n\n", currentInterface);
+        //printf("================ interface %s\n\n\n", currentInterface);
 
                 //if (macOption->link_layer_addr[5] == 0x54) {
             sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4 + 4 + strlen(currentInterface));
