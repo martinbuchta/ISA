@@ -18,6 +18,15 @@
 #include <net/if.h>
 #include <thread>
 #include <vector>
+#include <map>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <iterator>
+#include <map>
 
 using namespace std;
 
@@ -66,6 +75,8 @@ struct __attribute__((__packed__)) mac_option
 };
 
 char currentInterface[1000];
+
+static char *ipMacMap;
 
 /**
  * Get name of the first non-loopback device.
@@ -168,7 +179,7 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
         perror("socket creation failed");
         exit(EXIT_FAILURE);
     } else {
-        printf("REPLY Socket created\n");
+        //printf("REPLY Socket created\n");
     }
 
     // bind to interface
@@ -206,7 +217,7 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
         exit(1);
     }
 
-    printf("RELY REPLY sent to interface %s\n", interface);
+    //printf("RELY REPLY sent to interface %s\n", interface);
 }
 
 void callbackServer(const u_char *packet, unsigned int packetLength)
@@ -215,7 +226,7 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
     const uint8_t msgType = *dhcpMshType;
 
     if (msgType == 13) {
-        printf("I have rely reply (13) message\n");
+        //printf("I have rely reply (13) message\n");
 
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) dhcpMshType;
         char interface[1000];
@@ -234,6 +245,12 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                 msgPtr = opt->option_data;
                 msgSize = opt->option_length[1];
                 usedOptions++;
+                if (opt->option_data[0] == 7) {
+                    char ipHumbanBuff[INET6_ADDRSTRLEN];
+                    inet_ntop(AF_INET6, msgPtr+24, ipHumbanBuff, sizeof(ipHumbanBuff));
+                    printf("%s,", ipHumbanBuff);
+                    printf("%s\n", ipMacMap);
+                }
             }
 
             if (opt->option_code[1] == 18) {
@@ -250,7 +267,6 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
             return;
         }
 
-        printf("\n\n========================================\n\n");
 
         sendUdpReply(msgPtr, msgSize, msg->peer_addr, msg->link_addr, interface);
     }
@@ -317,6 +333,14 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
     //printf("Msg-Type: %d\n", msgType);
 
     if (msgType == 1 || msgType == 3) {
+        //printf("test!!!!!!!!!!\n");
+        sprintf(ipMacMap,"%02x:%02x:%02x:%02x:%02x:%02x", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
+               ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
+        //char ipHumbanBuff[INET6_ADDRSTRLEN];
+        //inet_ntop(AF_INET6, (const void *) &(ip_header.src), ipHumbanBuff, sizeof(ipHumbanBuff));
+        //string ipHumanString = ipHumbanBuff;
+        //cout << ipHumanString << flush;
+        //printf("%s\n\n", ipHumbanBuff);
         /*printf("I have a SOLICIT (1) message.\n");
         printf("For relay rofward message alloc %d bytes\n", 34 + ntohs(udp_header->uh_ulen) - 8 + 12);*/
 
@@ -378,7 +402,7 @@ void sniffInterface(char *interface)
     struct bpf_program fp;
     bpf_u_int32 pMask; /* subnet mask */
     bpf_u_int32 pNet;  /* ip address*/
-    printf("Device: %s\n", interface);
+    //printf("Device: %s\n", interface);
 
     pcap_lookupnet(interface, &pNet, &pMask, errbuf);
 
@@ -394,7 +418,7 @@ void sniffInterface(char *interface)
 
     // Set the filter compiled above
     if (pcap_setfilter(descr, &fp) == -1) {
-        printf("\npcap_setfilter() failed\n");
+        fprintf(stderr, "\npcap_setfilter() failed\n");
         exit(1);
     }
 
@@ -407,8 +431,9 @@ int main()
     struct bpf_program fp;
     bpf_u_int32 pMask; /* subnet mask */
     bpf_u_int32 pNet;  /* ip address*/
-    cout << "Hello world!\n";
+    //cout << "Hello world!\n";
     char *interface;
+    ipMacMap = (char*) mmap(NULL, 100*sizeof(char), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
     if (fork() == 0) {
         // sniffing interface that comunicates with server
@@ -443,8 +468,6 @@ int main()
 
             callbackServer((const u_char *) buffer, n);
         }
-
-        pcap_loop(descr, 1500, callbackServer, NULL);*/
     } else {
         pcap_if_t *interfaces;
         char errbuf[PCAP_ERRBUF_SIZE];
@@ -465,8 +488,6 @@ int main()
 
         while(1);
     }
-
-    //pcap_loop();
 
     return 0;
 }
