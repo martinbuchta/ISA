@@ -495,6 +495,8 @@ int main()
         interfaces = interfaces->next;
     }
 
+    syslog(LOG_INFO, "%s", "Hellou,myllog");
+
     for (int y = 0; y < i; y++) {
         threads[y].join();
     }
