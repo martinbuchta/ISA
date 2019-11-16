@@ -28,6 +28,7 @@
 #include <iterator>
 #include <map>
 #include <syslog.h>
+#include <mutex>
 
 using namespace std;
 
@@ -76,6 +77,7 @@ struct __attribute__((__packed__)) mac_option
 };
 
 std::map<string, string> ipMacMap;
+std::mutex mtx;
 
 /**
  * Get name of the first non-loopback device.
@@ -249,10 +251,11 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                     char ipHumbanBuff[INET6_ADDRSTRLEN];
                     inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
                     string ipHumanString = ipHumbanBuff;
+                    mtx.lock();
                     cout << ipHumbanBuff << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
                     string log = ipHumanString + "," + ipMacMap.find(ipHumanString)->second;
-
                     syslog(LOG_INFO, "%s", log.c_str());
+                    mtx.unlock();
                 }
             }
 
@@ -344,7 +347,9 @@ void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char 
         inet_ntop(AF_INET6, (const void *) &(ip_header.src), ipHumbanBuff, sizeof(ipHumbanBuff));
         string ipHumanString = ipHumbanBuff;
         string macHumanString = macAddrStr;
+        mtx.lock();
         ipMacMap.insert({ipHumanString, macHumanString});
+        mtx.unlock();
         //cout << ipHumanString << "\t" << macHumanString << "\n" << flush;
         //cout << ipHumanString << flush;
         //printf("%s\n\n", ipHumbanBuff);
@@ -494,8 +499,6 @@ int main()
         i++;
         interfaces = interfaces->next;
     }
-
-    syslog(LOG_INFO, "%s", "Hellou,myllog");
 
     for (int y = 0; y < i; y++) {
         threads[y].join();
