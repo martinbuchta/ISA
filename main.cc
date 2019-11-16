@@ -74,9 +74,7 @@ struct __attribute__((__packed__)) mac_option
     uint8_t link_layer_addr[];
 };
 
-char currentInterface[1000];
-
-static char *ipMacMap;
+std::map<string, string> ipMacMap;
 
 /**
  * Get name of the first non-loopback device.
@@ -247,9 +245,9 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                 usedOptions++;
                 if (opt->option_data[0] == 7) {
                     char ipHumbanBuff[INET6_ADDRSTRLEN];
-                    inet_ntop(AF_INET6, msgPtr+24, ipHumbanBuff, sizeof(ipHumbanBuff));
-                    printf("%s,", ipHumbanBuff);
-                    printf("%s\n", ipMacMap);
+                    inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
+                    string ipHumanString = ipHumbanBuff;
+                    cout << ipHumbanBuff << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
                 }
             }
 
@@ -273,10 +271,10 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
 }
 
 
-void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet)
+void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char *packet)
 {
-    useless = NULL;
     static int count = 1;
+    char *currentInterface = (char *) interface;
 
     size_t ipv6OptionsLen = 0;
 
@@ -334,11 +332,15 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
 
     if (msgType == 1 || msgType == 3) {
         //printf("test!!!!!!!!!!\n");
-        sprintf(ipMacMap,"%02x:%02x:%02x:%02x:%02x:%02x", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
+        char macAddrStr[20];
+        sprintf(macAddrStr,"%02x:%02x:%02x:%02x:%02x:%02x", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
                ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
-        //char ipHumbanBuff[INET6_ADDRSTRLEN];
-        //inet_ntop(AF_INET6, (const void *) &(ip_header.src), ipHumbanBuff, sizeof(ipHumbanBuff));
-        //string ipHumanString = ipHumbanBuff;
+        char ipHumbanBuff[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, (const void *) &(ip_header.src), ipHumbanBuff, sizeof(ipHumbanBuff));
+        string ipHumanString = ipHumbanBuff;
+        string macHumanString = macAddrStr;
+        ipMacMap.insert({ipHumanString, macHumanString});
+        //cout << ipHumanString << "\t" << macHumanString << "\n" << flush;
         //cout << ipHumanString << flush;
         //printf("%s\n\n", ipHumbanBuff);
         /*printf("I have a SOLICIT (1) message.\n");
@@ -396,7 +398,7 @@ void callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *p
 
 void sniffInterface(char *interface)
 {
-    strcpy(currentInterface, interface);
+    //printf("%s\n", interface);
 
     char errbuf[PCAP_ERRBUF_SIZE];
     struct bpf_program fp;
@@ -422,7 +424,43 @@ void sniffInterface(char *interface)
         exit(1);
     }
 
-    pcap_loop(descr, 1500, callback, NULL);
+    pcap_loop(descr, 1500, callback, (u_char *) interface);
+}
+
+void sniffServer()
+{
+    // sniffing interface that comunicates with server
+    int sockfd;
+    char buffer[2048];
+    struct sockaddr_in6 servaddr, cliaddr;
+
+    if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&servaddr, 0, sizeof(servaddr));
+    memset(&cliaddr, 0, sizeof(cliaddr));
+
+    servaddr.sin6_family = AF_INET6;
+    servaddr.sin6_addr = in6addr_any;
+    servaddr.sin6_port = htons(547);
+
+    if ( bind(sockfd, (const struct sockaddr *)&servaddr,
+              sizeof(servaddr)) < 0 )
+    {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    unsigned int len, n;
+    while (1) {
+        n = recvfrom(sockfd, (char *) buffer, 2048,
+                     MSG_WAITALL, (struct sockaddr *) &cliaddr,
+                     &len);
+
+        callbackServer((const u_char *) buffer, n);
+    }
 }
 
 int main()
@@ -433,61 +471,29 @@ int main()
     bpf_u_int32 pNet;  /* ip address*/
     //cout << "Hello world!\n";
     char *interface;
-    ipMacMap = (char*) mmap(NULL, 100*sizeof(char), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
-    if (fork() == 0) {
-        // sniffing interface that comunicates with server
-        int sockfd;
-        char buffer[2048];
-        struct sockaddr_in6 servaddr, cliaddr;
+    std::thread ts(sniffServer);
 
-        if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) {
-            perror("socket creation failed");
-            exit(EXIT_FAILURE);
-        }
-
-        memset(&servaddr, 0, sizeof(servaddr));
-        memset(&cliaddr, 0, sizeof(cliaddr));
-
-        servaddr.sin6_family = AF_INET6;
-        servaddr.sin6_addr = in6addr_any;
-        servaddr.sin6_port = htons(547);
-
-        if ( bind(sockfd, (const struct sockaddr *)&servaddr,
-                  sizeof(servaddr)) < 0 )
-        {
-            perror("bind failed");
-            exit(EXIT_FAILURE);
-        }
-
-        unsigned int len, n;
-        while (1) {
-            n = recvfrom(sockfd, (char *) buffer, 2048,
-                         MSG_WAITALL, (struct sockaddr *) &cliaddr,
-                         &len);
-
-            callbackServer((const u_char *) buffer, n);
-        }
-    } else {
-        pcap_if_t *interfaces;
-        char errbuf[PCAP_ERRBUF_SIZE];
-        if (pcap_findalldevs(&interfaces,errbuf) == -1) {
-            fprintf(stderr, "Couldnt find any device.\n");
-        }
-
-        int i = 0;
-
-        while (interfaces != nullptr) {
-            if (fork() == 0) {
-                sniffInterface(interfaces->name);
-                return 0;
-            }
-            i++;
-            interfaces = interfaces->next;
-        }
-
-        while(1);
+    pcap_if_t *interfaces;
+    if (pcap_findalldevs(&interfaces,errbuf) == -1) {
+        fprintf(stderr, "Couldnt find any device.\n");
     }
+
+    int i = 0;
+    std::thread threads[100];
+
+    while (interfaces != nullptr) {
+        //t(sniffInterface, interfaces->name);
+        threads[i] = std::thread(sniffInterface, interfaces->name);
+        i++;
+        interfaces = interfaces->next;
+    }
+
+    for (int y = 0; y < i; y++) {
+        threads[y].join();
+    }
+
+    while(1);
 
     return 0;
 }
