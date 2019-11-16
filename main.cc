@@ -249,11 +249,14 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                 usedOptions++;
                 if (opt->option_data[0] == 7) {
                     char ipHumbanBuff[INET6_ADDRSTRLEN];
+                    char ipReceived[INET6_ADDRSTRLEN];
                     inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
+                    inet_ntop(AF_INET6, &(opt->option_data[24]), ipReceived, sizeof(ipReceived));
                     string ipHumanString = ipHumbanBuff;
+                    string ipReceivedString = ipReceived;
                     mtx.lock();
-                    cout << ipHumbanBuff << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
-                    string log = ipHumanString + "," + ipMacMap.find(ipHumanString)->second;
+                    cout << ipReceivedString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                    string log = ipReceivedString + "," + ipMacMap.find(ipHumanString)->second;
                     syslog(LOG_INFO, "%s", log.c_str());
                     mtx.unlock();
                 }
