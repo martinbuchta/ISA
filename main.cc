@@ -209,27 +209,13 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
     printf("RELY REPLY sent to interface %s\n", interface);
 }
 
-void callbackServer(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet)
+void callbackServer(const u_char *packet, unsigned int packetLength)
 {
-    struct ether_header ethernet_header;
-    memcpy(&ethernet_header, packet, sizeof(struct ether_header));
-
-    struct ipv6_header ip_header;
-    memcpy(&ip_header, packet + sizeof(struct ether_header), sizeof(struct ipv6_header));
-
-    if (ip_header.next_header != 17) { // TODO
-        printf("Oh, this should never happen :( \n Next header should be UDP, but isn't.\n");
-    }
-
-    const struct udphdr *udp_header;
-    udp_header = (struct udphdr *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header));
-    uint16_t packetLength = ntohs(udp_header->len);
-
-    const u_char *dhcpMshType = packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr);
+    const u_char *dhcpMshType = packet/* + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr)*/;
     const uint8_t msgType = *dhcpMshType;
 
     if (msgType == 13) {
-        //printf("I have rely reply (13) message\n");
+        printf("I have rely reply (13) message\n");
 
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) dhcpMshType;
         char interface[1000];
@@ -242,10 +228,7 @@ void callbackServer(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_c
         unsigned int usedOptions = 0;
 
         while (packetLength > 8 + 34 + move) {
-            printf("%d > %d\n", packetLength, 8 + 34 + move);
             opt = (struct option *) ((char *) &(msg->options) + move);
-
-            printf("code %d, lenth %d, ", opt->option_code[1], opt->option_code[1]);
 
             if (opt->option_code[1] == 9) {
                 msgPtr = opt->option_data;
@@ -429,30 +412,39 @@ int main()
 
     if (fork() == 0) {
         // sniffing interface that comunicates with server
-        interface = (char *) "enp4s0f1";
-        printf("Device: %s\n", interface);
+        int sockfd;
+        char buffer[2048];
+        struct sockaddr_in6 servaddr, cliaddr;
 
-        pcap_lookupnet(interface, &pNet, &pMask, errbuf);
-
-        pcap_t *descr = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
-        if (descr == NULL) {
-            printf("pcap_open_live() failed due to [%s]\n", errbuf);
-            return -1;
+        if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) {
+            perror("socket creation failed");
+            exit(EXIT_FAILURE);
         }
 
-        // Compile the filter expression
-        if (pcap_compile(descr, &fp, "port 547", 0, pNet) == -1) {
-            printf("\npcap_compile() failed\n");
-            return -1;
+        memset(&servaddr, 0, sizeof(servaddr));
+        memset(&cliaddr, 0, sizeof(cliaddr));
+
+        servaddr.sin6_family = AF_INET6;
+        servaddr.sin6_addr = in6addr_any;
+        servaddr.sin6_port = htons(547);
+
+        if ( bind(sockfd, (const struct sockaddr *)&servaddr,
+                  sizeof(servaddr)) < 0 )
+        {
+            perror("bind failed");
+            exit(EXIT_FAILURE);
         }
 
-        // Set the filter compiled above
-        if (pcap_setfilter(descr, &fp) == -1) {
-            printf("\npcap_setfilter() failed\n");
-            exit(1);
+        unsigned int len, n;
+        while (1) {
+            n = recvfrom(sockfd, (char *) buffer, 2048,
+                         MSG_WAITALL, (struct sockaddr *) &cliaddr,
+                         &len);
+
+            callbackServer((const u_char *) buffer, n);
         }
 
-        pcap_loop(descr, 1500, callbackServer, NULL);
+        pcap_loop(descr, 1500, callbackServer, NULL);*/
     } else {
         pcap_if_t *interfaces;
         char errbuf[PCAP_ERRBUF_SIZE];
