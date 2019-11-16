@@ -24,13 +24,20 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 #include <iterator>
 #include <map>
 #include <syslog.h>
 #include <mutex>
 
 using namespace std;
+
+struct parameters
+{
+    bool stdout_enabled;
+    bool syslog_enabled;
+    char *server;
+    char *interface;
+};
 
 struct ipv6_header
 {
@@ -78,6 +85,7 @@ struct __attribute__((__packed__)) mac_option
 
 std::map<string, string> ipMacMap;
 std::mutex mtx;
+struct parameters params;
 
 /**
  * Get name of the first non-loopback device.
@@ -157,8 +165,17 @@ void sendUdpForward(char *data, size_t length)
       
     // Filling server information 
     servaddr.sin6_family = AF_INET6; 
-    servaddr.sin6_port = htons(547); 
-    inet_pton(AF_INET6, "2001:67c:1220:80c::93e5:dd2", &servaddr.sin6_addr);
+    servaddr.sin6_port = htons(547);
+    int s = inet_pton(AF_INET6, params.server, &servaddr.sin6_addr);
+    if (s <= 0) {
+        if (s == 0) {
+            fprintf(stderr, "Adresa serveru je ve špatném formátu. Zadejte IPv6 adresu.\n");
+            exit(22);
+        } else {
+            perror("Adresa serveru:");
+            exit(22);
+        }
+    }
 
     if( sendto(sockfd, (const char *)data, length, 
         MSG_CONFIRM, (const struct sockaddr *) &servaddr,  
@@ -255,9 +272,13 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                     string ipHumanString = ipHumbanBuff;
                     string ipReceivedString = ipReceived;
                     mtx.lock();
-                    cout << ipReceivedString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
-                    string log = ipReceivedString + "," + ipMacMap.find(ipHumanString)->second;
-                    syslog(LOG_INFO, "%s", log.c_str());
+                    if (params.stdout_enabled) {
+                        cout << ipReceivedString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                    }
+                    if (params.syslog_enabled) {
+                        string log = ipReceivedString + "," + ipMacMap.find(ipHumanString)->second;
+                        syslog(LOG_INFO, "%s", log.c_str());
+                    }
                     mtx.unlock();
                 }
             }
@@ -419,7 +440,12 @@ void sniffInterface(char *interface)
     bpf_u_int32 pNet;  /* ip address*/
     //printf("Device: %s\n", interface);
 
-    pcap_lookupnet(interface, &pNet, &pMask, errbuf);
+    int r = pcap_lookupnet(interface, &pNet, &pMask, errbuf);
+
+    if (r != 0 && params.interface != nullptr) {
+        perror("Interface error");
+        exit(32);
+    }
 
     pcap_t *descr = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
     if (descr == NULL) {
@@ -476,8 +502,54 @@ void sniffServer()
     }
 }
 
-int main()
+void parseParameters(int argc, char *argv[])
 {
+    int opt;
+    while((opt = getopt(argc, argv, "s:li:d")) != -1) {
+        switch (opt) {
+            case 's':
+                params.server = optarg;
+                break;
+
+            case 'l':
+                params.syslog_enabled = true;
+                break;
+
+            case 'i':
+                params.interface = optarg;
+                break;
+
+            case 'd':
+                params.stdout_enabled = true;
+                break;
+
+            case '?':
+                fprintf(stderr, "Špatně zadaný parametr %c! Viz manuál.\n", optopt);
+                exit(22);
+                break;
+
+            case ':':
+                fprintf(stderr, "Argument potřebuje hodnotu!\n");
+                exit(22);
+                break;
+        }
+    }
+
+    for(; optind < argc; optind++){
+        fprintf(stderr, "Neznámý argument: %s\n", argv[optind]);
+        exit(22);
+    }
+
+    if (params.server == nullptr) {
+        fprintf(stderr, "Zadejte adresu DHCPv6 serveru. Např.: d6r -s IP6_ADDR_SERVERU\n");
+        exit(22);
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    parseParameters(argc, argv);
+
     char errbuf[PCAP_ERRBUF_SIZE];
     struct bpf_program fp;
     bpf_u_int32 pMask; /* subnet mask */
@@ -493,18 +565,23 @@ int main()
         fprintf(stderr, "Couldnt find any device.\n");
     }
 
-    int i = 0;
-    std::thread threads[100];
+    if (params.interface == nullptr) {
+        int i = 0;
+        std::thread threads[100];
 
-    while (interfaces != nullptr) {
-        //t(sniffInterface, interfaces->name);
-        threads[i] = std::thread(sniffInterface, interfaces->name);
-        i++;
-        interfaces = interfaces->next;
-    }
+        while (interfaces != nullptr) {
+            //t(sniffInterface, interfaces->name);
+            threads[i] = std::thread(sniffInterface, interfaces->name);
+            i++;
+            interfaces = interfaces->next;
+        }
 
-    for (int y = 0; y < i; y++) {
-        threads[y].join();
+        for (int y = 0; y < i; y++) {
+            threads[y].join();
+        }
+    } else {
+        std::thread t(sniffInterface, params.interface);
+        t.join();
     }
 
     while(1);
