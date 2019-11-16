@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <iterator>
 #include <map>
+#include <syslog.h>
 
 using namespace std;
 
@@ -240,6 +241,7 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
             opt = (struct option *) ((char *) &(msg->options) + move);
 
             if (opt->option_code[1] == 9) {
+                // TODO check, if the address is in the map
                 msgPtr = opt->option_data;
                 msgSize = opt->option_length[1];
                 usedOptions++;
@@ -248,6 +250,9 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                     inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
                     string ipHumanString = ipHumbanBuff;
                     cout << ipHumbanBuff << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                    string log = ipHumanString + "," + ipMacMap.find(ipHumanString)->second;
+
+                    syslog(LOG_INFO, "%s", log.c_str());
                 }
             }
 
@@ -471,6 +476,7 @@ int main()
     bpf_u_int32 pNet;  /* ip address*/
     //cout << "Hello world!\n";
     char *interface;
+    openlog ("d6r", LOG_CONS, LOG_USER);
 
     std::thread ts(sniffServer);
 
