@@ -12,25 +12,24 @@
 #include <ifaddrs.h>
 #include <cstdint>
 #include <stdio.h>
-#include <sys/types.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <thread>
 #include <vector>
 #include <map>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <iterator>
-#include <map>
 #include <syslog.h>
 #include <mutex>
 
 using namespace std;
 
+/**
+ * @brief Struktura pro parametry, se kterými byl program spuštěn.
+ */
 struct parameters
 {
     bool stdout_enabled;
@@ -39,6 +38,10 @@ struct parameters
     char *interface;
 };
 
+/**
+ * @brief IPv6 hlavička
+ * @author https://stackoverflow.com/a/7980674
+ */
 struct ipv6_header
 {
     unsigned int
@@ -52,6 +55,9 @@ struct ipv6_header
     struct in6_addr dst;
 };
 
+/**
+ * @brief Option v IPv6 hlavičce
+ */
 struct ipv6_header_option
 {
     uint8_t next_header;
@@ -59,6 +65,9 @@ struct ipv6_header_option
     uint8_t data[];
 };
 
+/**
+ * @brief Struktura pro DHCPv6 relay-server zprávu
+ */
 struct __attribute__((__packed__)) dhcpv6_relay_server_message
 {
     uint8_t msgType;
@@ -68,6 +77,9 @@ struct __attribute__((__packed__)) dhcpv6_relay_server_message
     uint8_t options[];
 };
 
+/**
+ * @brief Struktura pro DHCPv6 option
+ */
 struct __attribute__((__packed__)) option
 {
     uint16_t option_code;
@@ -75,6 +87,10 @@ struct __attribute__((__packed__)) option
     uint8_t option_data[];
 };
 
+/**
+ * @brief Struktura pro posílání MAC adresy klienta DHCPv6 serveru.
+ * Viz RFC 6939.
+ */
 struct __attribute__((__packed__)) mac_option
 {
     uint16_t option_code;
@@ -83,42 +99,35 @@ struct __attribute__((__packed__)) mac_option
     uint8_t link_layer_addr[];
 };
 
+/**
+ * @brief Mapa, která mapuje lokální IPv6 adresu klienta a jeho MAC adresu.
+ * Pro účely logování a výpisu na stdout.
+ */
 std::map<string, string> ipMacMap;
+
+/**
+ * @brief Zámek pro práci se sdílenými zdroji (ipMacMap, stdout).
+ */
 std::mutex mtx;
+
+/**
+ * @brief Parametry, se kterými byl spuštěný program
+ */
 struct parameters params;
 
 /**
- * Get name of the first non-loopback device.
- * 
- * @return Name of the interface
- */
-char *getFirstDevice()
-{
-    char *dev, errbuf[PCAP_ERRBUF_SIZE];
-
-    dev = pcap_lookupdev(errbuf);
-
-    if (dev == NULL)
-    {
-        fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
-        exit(1);
-    }
-
-    return dev;
-}
-
-/**
- * This function is insiped by https://stackoverflow.com/a/33127330
+ * @brief Vrací první IPv6 adresu inteface.
+ * @param interface Název interface
+ * Inspirované: https://stackoverflow.com/a/33127330
  */
 struct in6_addr getIp6OfInterface(char *interface)
 {
 
-    struct in6_addr toReturn;
     struct ifaddrs *ifa, *ifa_tmp;
     char addr[50];
 
     if (getifaddrs(&ifa) == -1) {
-        perror("getifaddrs failed");
+        perror("getifaddrs error");
         exit(1);
     }
 
@@ -129,18 +138,14 @@ struct in6_addr getIp6OfInterface(char *interface)
         if ((ifa_tmp->ifa_addr) && ((ifa_tmp->ifa_addr->sa_family == AF_INET) ||
                                 (ifa_tmp->ifa_addr->sa_family == AF_INET6))) {
             if (ifa_tmp->ifa_addr->sa_family == AF_INET) {
-                // create IPv4 string
                 struct sockaddr_in *in = (struct sockaddr_in*) ifa_tmp->ifa_addr;
                 inet_ntop(AF_INET, &in->sin_addr, addr, sizeof(addr));
-            } else { // AF_INET6
-                // create IPv6 string
+            } else {
                 in6 = (struct sockaddr_in6*) ifa_tmp->ifa_addr;
                 inet_ntop(AF_INET6, &in6->sin6_addr, addr, sizeof(addr));
             }
 
             if (strcmp(interface, ifa_tmp->ifa_name) == 0  && ifa_tmp->ifa_addr->sa_family == AF_INET6) {
-                //printf("\nname = %s\n", ifa_tmp->ifa_name);
-                //printf("addr = %s\n", addr);
                 return in6->sin6_addr;
             }
         }
@@ -150,20 +155,23 @@ struct in6_addr getIp6OfInterface(char *interface)
     return in6->sin6_addr;
 }
 
+/**
+ * @brief Posílá UDP packet na DHCP server
+ * @param data Packet
+ * @param length Délka dat
+ */
 void sendUdpForward(char *data, size_t length)
 {
     int sockfd;
     if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) { 
         perror("socket creation failed"); 
         exit(EXIT_FAILURE); 
-    } else {
-        //printf("Socket created\n");
-    } 
+    }
 
-    struct sockaddr_in6     servaddr; 
+    struct sockaddr_in6 servaddr;
     memset(&servaddr, 0, sizeof(servaddr)); 
       
-    // Filling server information 
+    // Údaje o serveru
     servaddr.sin6_family = AF_INET6; 
     servaddr.sin6_port = htons(547);
     int s = inet_pton(AF_INET6, params.server, &servaddr.sin6_addr);
@@ -180,27 +188,28 @@ void sendUdpForward(char *data, size_t length)
     if( sendto(sockfd, (const char *)data, length, 
         MSG_CONFIRM, (const struct sockaddr *) &servaddr,  
             sizeof(servaddr)) <0 ) {
-        /* buffers aren't available locally at the moment,
-        * try again.
-        */
         perror("UDP err");
         exit(1);
     }
-
-    //printf("RELY FORWARD sent\n");
 }
 
+/**
+ * @brief Posílá UDP odpověd klientovi
+ * @param data Packet data
+ * @param length Délka dat
+ * @param clientAddr Lokální adresa klienta
+ * @param linkAddr Adresa interface
+ * @param interface Název interface, přes který se má zpráva poslat
+ */
 void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, struct in6_addr linkAddr, char *interface)
 {
     int sockfd;
     if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0 ) {
         perror("socket creation failed");
         exit(EXIT_FAILURE);
-    } else {
-        //printf("REPLY Socket created\n");
     }
 
-    // bind to interface
+    // Vyber interface
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
     snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), interface);
@@ -210,7 +219,7 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
     }
 
 
-    // bind source ip
+    // Nastav zdrojovou adresa
     struct sockaddr_in6 localaddr;
     localaddr.sin6_family = AF_INET6;
     localaddr.sin6_addr = linkAddr;
@@ -220,7 +229,7 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
     struct sockaddr_in6     servaddr;
     memset(&servaddr, 0, sizeof(servaddr));
 
-    // Filling server information
+    // Informace o serveru
     servaddr.sin6_family = AF_INET6;
     servaddr.sin6_port = htons(546);
     servaddr.sin6_addr = clientAddr;
@@ -228,39 +237,34 @@ void sendUdpReply(uint8_t *data, size_t length, struct in6_addr clientAddr, stru
     if( sendto(sockfd, (const char *)data, length,
                MSG_CONFIRM, (const struct sockaddr *) &servaddr,
                sizeof(servaddr)) <0 ) {
-        /* buffers aren't available locally at the moment,
-        * try again.
-        */
         perror("UDP err");
         exit(1);
     }
-
-    //printf("RELY REPLY sent to interface %s\n", interface);
 }
 
+/**
+ * Funkce zpracovávající zprávy od DHCPv6 serveru
+ * @param packet Data
+ * @param packetLength Délka dat
+ */
 void callbackServer(const u_char *packet, unsigned int packetLength)
 {
-    const u_char *dhcpMshType = packet/* + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr)*/;
+    const u_char *dhcpMshType = packet;
     const uint8_t msgType = *dhcpMshType;
 
     if (msgType == 13) {
-        //printf("I have rely reply (13) message\n");
-
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) dhcpMshType;
         char interface[1000];
         uint8_t *msgPtr = nullptr;
         size_t msgSize = 0;
-
         struct option *opt;
         uint16_t move = 0;
-
         unsigned int usedOptions = 0;
 
-        while (packetLength > 8 + 34 + move) {
+        while (packetLength > (unsigned) 8 + (unsigned) 34 + move) {
             opt = (struct option *) ((char *) &(msg->options) + move);
 
             if (ntohs(opt->option_code) == 9) {
-                // TODO check, if the address is in the map
                 msgPtr = opt->option_data;
                 msgSize = ntohs(opt->option_length);
                 usedOptions++;
@@ -377,6 +381,12 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
 }
 
 
+/**
+ * Funkce zpracovávající zprávy od klienta
+ * @param interface Název interface, na kterém byl dotaz zachycen
+ * @param pkthdr
+ * @param packet Data
+ */
 void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char *packet)
 {
     static int count = 1;
@@ -384,28 +394,11 @@ void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char 
 
     size_t ipv6OptionsLen = 0;
 
-    //printf("\nPacket number [%d], length of this packet is: %d\n", count++, pkthdr->len);
-
-    /**
-     * ethernet header
-     */
-
     struct ether_header ethernet_header;
     memcpy(&ethernet_header, packet, sizeof(struct ether_header));
 
-    /*printf("--------- Ethernet ---------\n");
-    printf("Source: ");
-    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
-           ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
-    printf("Dest: ");
-    printf("%02x:%02x:%02x:%02x:%02x:%02x\n", ethernet_header.ether_dhost[0], ethernet_header.ether_dhost[1],
-           ethernet_header.ether_dhost[2], ethernet_header.ether_dhost[3], ethernet_header.ether_dhost[4], ethernet_header.ether_dhost[5]);
-    */
     struct ipv6_header ip_header;
     memcpy(&ip_header, packet + sizeof(struct ether_header), sizeof(struct ipv6_header));
-    /*printf("--------- IPv6 ---------\n");
-    printf("ip version %d\n", ip_header.version);
-    printf("Next header: %u\n", ip_header.next_header);*/
 
     if (ip_header.next_header != 17) {
         struct ipv6_header_option *option = (struct ipv6_header_option *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + ipv6OptionsLen);
@@ -416,28 +409,16 @@ void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char 
         }
 
         if (option->next_header != 17) {
-            // udp header not found
-            //printf("Udp header not found\n");
             return;
         }
     }
 
-    //printf("found\n");
-
     const struct udphdr *udp_header;
     udp_header = (struct udphdr *) (packet + sizeof(struct ether_header) + sizeof(struct ipv6_header));
-    /*printf("--------- UDP ---------\n");
-    printf("Source: %d\n", ntohs(udp_header->uh_sport));
-    printf("Dest: %d\n", ntohs(udp_header->uh_dport));
-    printf("Length: %d\n", ntohs(udp_header->uh_ulen));*/
-
-    //printf("---- zkousim stesti DHCP ----");
     const u_char *dhcpMshType = packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr);
     const uint8_t msgType = *dhcpMshType;
-    //printf("Msg-Type: %d\n", msgType);
 
     if (msgType == 1 || msgType == 3) {
-        //printf("test!!!!!!!!!!\n");
         char macAddrStr[20];
         sprintf(macAddrStr,"%02x:%02x:%02x:%02x:%02x:%02x", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
                ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[4], ethernet_header.ether_shost[5]);
@@ -448,20 +429,14 @@ void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char 
         mtx.lock();
         ipMacMap.insert({ipHumanString, macHumanString});
         mtx.unlock();
-        //cout << ipHumanString << "\t" << macHumanString << "\n" << flush;
-        //cout << ipHumanString << flush;
-        //printf("%s\n\n", ipHumbanBuff);
-        /*printf("I have a SOLICIT (1) message.\n");
-        printf("For relay rofward message alloc %d bytes\n", 34 + ntohs(udp_header->uh_ulen) - 8 + 12);*/
 
-        // create relay forward message
+        // Vytvoř relay forward zprávu
         
         struct dhcpv6_relay_server_message *msg = (struct dhcpv6_relay_server_message *) malloc(
             (34 + ntohs(udp_header->uh_ulen) - 8) + (12) + 100
             + 4 + strlen(currentInterface)
-        ); // 100 bytu alokuju navic, abych se pojistil, ze omylem neprepisu data od klihovny c pro spravu pameti
+        );
 
-        //printf("malloc ok\n");
         msg->msgType = 12;
         msg->hopCount = 0;
         msg->link_addr = getIp6OfInterface(currentInterface);
@@ -490,25 +465,22 @@ void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char 
         interfaceIdOption->option_length = htons(strlen(currentInterface));
         memcpy(&(interfaceIdOption->option_data), currentInterface, strlen(currentInterface));
 
-        //printf("================ interface %s\n\n\n", currentInterface);
-
-                //if (macOption->link_layer_addr[5] == 0x54) {
-            sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4 + 4 + strlen(currentInterface));
-        //}
+        sendUdpForward((char *) msg, 34 + ntohs(udp_header->uh_ulen) - 8 + 12 + 4 + 4 + strlen(currentInterface));
 
         free(msg);
     }
 }
 
+/**
+ * @brief Zapíná poslouchání na daném interface
+ * @param interface Název interface
+ */
 void sniffInterface(char *interface)
 {
-    //printf("%s\n", interface);
-
     char errbuf[PCAP_ERRBUF_SIZE];
     struct bpf_program fp;
-    bpf_u_int32 pMask; /* subnet mask */
-    bpf_u_int32 pNet;  /* ip address*/
-    //printf("Device: %s\n", interface);
+    bpf_u_int32 pMask;
+    bpf_u_int32 pNet;
 
     int r = pcap_lookupnet(interface, &pNet, &pMask, errbuf);
 
@@ -522,23 +494,23 @@ void sniffInterface(char *interface)
         return;
     }
 
-    // Compile the filter expression
     if (pcap_compile(descr, &fp, "port 547", 0, pNet) == -1) {
         return;
     }
 
-    // Set the filter compiled above
     if (pcap_setfilter(descr, &fp) == -1) {
-        fprintf(stderr, "\npcap_setfilter() failed\n");
+        fprintf(stderr, "\npcap_setfilter() error\n");
         exit(1);
     }
 
     pcap_loop(descr, 1500, callback, (u_char *) interface);
 }
 
+/**
+ * @brief Zapíná poslouchání zpráv od DHCPv6 serveru
+ */
 void sniffServer()
 {
-    // sniffing interface that comunicates with server
     int sockfd;
     char buffer[2048];
     struct sockaddr_in6 servaddr, cliaddr;
@@ -572,6 +544,11 @@ void sniffServer()
     }
 }
 
+/**
+ * @brief Parsuje argumenty programu
+ * @param argc Počet argumentů
+ * @param argv Argumenty
+ */
 void parseParameters(int argc, char *argv[])
 {
     int opt;
@@ -616,23 +593,24 @@ void parseParameters(int argc, char *argv[])
     }
 }
 
+/**
+ * @brief Vstupní bod programu
+ * @param argc počet argumentů
+ * @param argv argumenty
+ * @return
+ */
 int main(int argc, char *argv[])
 {
     parseParameters(argc, argv);
 
     char errbuf[PCAP_ERRBUF_SIZE];
-    struct bpf_program fp;
-    bpf_u_int32 pMask; /* subnet mask */
-    bpf_u_int32 pNet;  /* ip address*/
-    //cout << "Hello world!\n";
-    char *interface;
     openlog ("d6r", LOG_CONS, LOG_USER);
 
     std::thread ts(sniffServer);
 
     pcap_if_t *interfaces;
     if (pcap_findalldevs(&interfaces,errbuf) == -1) {
-        fprintf(stderr, "Couldnt find any device.\n");
+        fprintf(stderr, "Není žádný interface dostupný.\n");
     }
 
     if (params.interface == nullptr) {
@@ -640,7 +618,6 @@ int main(int argc, char *argv[])
         std::thread threads[100];
 
         while (interfaces != nullptr) {
-            //t(sniffInterface, interfaces->name);
             threads[i] = std::thread(sniffInterface, interfaces->name);
             i++;
             interfaces = interfaces->next;
