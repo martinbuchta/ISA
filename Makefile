@@ -1,7 +1,7 @@
 CPP=g++
 CPPFLAGS=-std=c++17 -Wextra -lpcap -g -lpthread
 
-.PHONY: clear
+.PHONY: clear zip
 
 all: d6r
 
