@@ -265,21 +265,95 @@ void callbackServer(const u_char *packet, unsigned int packetLength)
                 msgSize = opt->option_length[1];
                 usedOptions++;
                 if (opt->option_data[0] == 7) {
-                    char ipHumbanBuff[INET6_ADDRSTRLEN];
-                    char ipReceived[INET6_ADDRSTRLEN];
-                    inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
-                    inet_ntop(AF_INET6, &(opt->option_data[24]), ipReceived, sizeof(ipReceived));
-                    string ipHumanString = ipHumbanBuff;
-                    string ipReceivedString = ipReceived;
-                    mtx.lock();
-                    if (params.stdout_enabled) {
-                        cout << ipReceivedString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                    struct option *replyOption = (struct option *) &(opt->option_data[4]);
+
+                    while (((char *) replyOption) < ((char *) opt) + opt->option_length[1]) {
+                        if (replyOption->option_code[1] == 3) {
+                            struct option *addrOption = (struct option *) &(replyOption->option_data[12]);
+                            while ((char *) addrOption < ((char *) replyOption) + replyOption->option_length[1]) {
+                                if (addrOption->option_code[1] == 5) {
+                                    char ipHumbanBuff[INET6_ADDRSTRLEN];
+                                    char ipReceived[INET6_ADDRSTRLEN];
+                                    inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
+                                    inet_ntop(AF_INET6, &(addrOption->option_data), ipReceived, sizeof(ipReceived));
+                                    string ipHumanString = ipHumbanBuff;
+                                    string ipReceivedString = ipReceived;
+                                    mtx.lock();
+                                    if (params.stdout_enabled) {
+                                        cout << ipReceivedString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                                    }
+                                    if (params.syslog_enabled) {
+                                        string log = ipReceivedString + "," + ipMacMap.find(ipHumanString)->second;
+                                        syslog(LOG_INFO, "%s", log.c_str());
+                                    }
+                                    mtx.unlock();
+                                    break;
+                                } else {
+                                    addrOption = (struct option *) (((char *) addrOption) +
+                                                                    addrOption->option_length[1] + 4);
+                                }
+                            }
+                            break;
+                        } else if (replyOption->option_code[1] == 4) {
+                            struct option *addrOption = (struct option *) &(replyOption->option_data[4]);
+                            while ((char *) addrOption < ((char *) replyOption) + replyOption->option_length[1]) {
+                                if (addrOption->option_code[1] == 5) {
+                                    char ipHumbanBuff[INET6_ADDRSTRLEN];
+                                    char ipReceived[INET6_ADDRSTRLEN];
+                                    inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
+                                    inet_ntop(AF_INET6, &(addrOption->option_data), ipReceived, sizeof(ipReceived));
+                                    string ipHumanString = ipHumbanBuff;
+                                    string ipReceivedString = ipReceived;
+                                    mtx.lock();
+                                    if (params.stdout_enabled) {
+                                        cout << ipReceivedString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                                    }
+                                    if (params.syslog_enabled) {
+                                        string log = ipReceivedString + "," + ipMacMap.find(ipHumanString)->second;
+                                        syslog(LOG_INFO, "%s", log.c_str());
+                                    }
+                                    mtx.unlock();
+                                    break;
+                                } else {
+                                    addrOption = (struct option *) (((char *) addrOption) +
+                                                                    addrOption->option_length[1] + 4);
+                                }
+                            }
+                            break;
+                        } else if (replyOption->option_code[1] == 25) {
+                            struct option *addrOption = (struct option *) &(replyOption->option_data[12]);
+                            while ((char *) addrOption < ((char *) replyOption) + replyOption->option_length[1]) {
+                                if (addrOption->option_code[1] == 26) {
+                                    uint8_t prefix = (uint8_t) addrOption->option_data[8];
+                                    char prefixBuff[10];
+                                    sprintf(prefixBuff, "%d", prefix);
+                                    string prefixString = prefixBuff;
+                                    char ipHumbanBuff[INET6_ADDRSTRLEN];
+                                    char ipReceived[INET6_ADDRSTRLEN];
+                                    inet_ntop(AF_INET6, &(msg->peer_addr), ipHumbanBuff, sizeof(ipHumbanBuff));
+                                    inet_ntop(AF_INET6, &(addrOption->option_data[9]), ipReceived, sizeof(ipReceived));
+                                    string ipHumanString = ipHumbanBuff;
+                                    string ipReceivedString = ipReceived;
+                                    mtx.lock();
+                                    if (params.stdout_enabled) {
+                                        cout << ipReceivedString << "/" << prefixString << "," << ipMacMap.find(ipHumanString)->second << "\n" << flush;
+                                    }
+                                    if (params.syslog_enabled) {
+                                        string log = ipReceivedString + "/" + prefixString + "," + ipMacMap.find(ipHumanString)->second;
+                                        syslog(LOG_INFO, "%s", log.c_str());
+                                    }
+                                    mtx.unlock();
+                                    break;
+                                } else {
+                                    addrOption = (struct option *) (((char *) addrOption) +
+                                                                    addrOption->option_length[1] + 4);
+                                }
+                            }
+                            break;
+                        } else {
+                            replyOption = (struct option *) (((char *) replyOption) + replyOption->option_length[1]);
+                        }
                     }
-                    if (params.syslog_enabled) {
-                        string log = ipReceivedString + "," + ipMacMap.find(ipHumanString)->second;
-                        syslog(LOG_INFO, "%s", log.c_str());
-                    }
-                    mtx.unlock();
                 }
             }
 
