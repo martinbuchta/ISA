@@ -507,23 +507,16 @@ void sniffInterface(char *interface)
 {
     char errbuf[PCAP_ERRBUF_SIZE];
     struct bpf_program fp;
-    bpf_u_int32 pMask;
-    bpf_u_int32 pNet;
-
-    int r = pcap_lookupnet(interface, &pNet, &pMask, errbuf);
-
-    if (r != 0 && params.interface != nullptr) {
-        perror("Interface error");
-        exit(32);
-    }
 
     pcap_t *descr = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
     if (descr == NULL) {
-        return;
+        fprintf(stderr, "Pcap open live error na interface %s: %s\n", interface, errbuf);
+        exit(32);
     }
 
-    if (pcap_compile(descr, &fp, "port 547", 0, pNet) == -1) {
-        return;
+    if (pcap_compile(descr, &fp, "udp port 547", 0, 0) == -1) {
+        perror("Pcap compile error: ");
+        exit(32);
     }
 
     if (pcap_setfilter(descr, &fp) == -1) {
@@ -641,22 +634,37 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Není žádný interface dostupný.\n");
     }
 
-    if (params.interface == nullptr) {
-        int i = 0;
-        std::thread threads[100];
+    int i = 0;
+    std::thread threads[100];
 
-        while (interfaces != nullptr) {
-            threads[i] = std::thread(sniffInterface, interfaces->name);
-            i++;
-            interfaces = interfaces->next;
+    while (interfaces != nullptr) {
+        pcap_addr_t *addr;
+        bool hasIpv6 = false;
+
+        // zjisti, jestli interface ma ipv6 hlavicku
+        for (addr = interfaces->addresses; addr != NULL; addr = addr->next) {
+            if (addr->addr->sa_family == AF_INET6 && addr->addr && addr->netmask) {
+                hasIpv6 = true;
+            }
         }
 
-        for (int y = 0; y < i; y++) {
-            threads[y].join();
+        if (params.interface == nullptr || strcmp(params.interface, interfaces->name) == 0) {
+            if (hasIpv6) {
+                threads[i] = std::thread(sniffInterface, interfaces->name);
+                i++;
+            }
         }
-    } else {
-        std::thread t(sniffInterface, params.interface);
-        t.join();
+
+        interfaces = interfaces->next;
+    }
+
+    if (i == 0) {
+        fprintf(stderr, "No interface found\n");
+        exit(33);
+    }
+
+    for (int y = 0; y < i; y++) {
+        threads[y].join();
     }
 
     while(1);
