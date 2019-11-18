@@ -1,0 +1,21 @@
+.TH CORRUPT 1
+.SH NAME
+d6r \- DHCPv6 relay
+.SH DESCRIPTION
+The DHCPv6 relay přeposílá DHCPv6 zprávy zachycené na nějakém interface DHCPv6 serveru, který zpravidla bývá mimo LAN.
+
+Parametry:
+    -s server       Adresa DHCPv6 serveru
+    -i interface    Název interface, na kterém bude zachyzávat DHCPv6 zprávy. Pokud není uvedeno, zachytává na všech interfacech.
+    -d              Zapíná debug výstup na stdout.
+    -l              Zapíná syslog logování.
+
+Požaduje root oprávnění.
+
+Příklad spuštění:
+    sudo ./d6r -s 2001:67c:1220:80c::93e5:dd2 -d -i vboxnet0
+
+.SH SEE ALSO
+dhclient
+.SH AUTHOR
+Martin Buchta (xbucht28@fit.vutbr.cz)

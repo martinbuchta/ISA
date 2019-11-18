@@ -446,7 +446,7 @@ void callback(u_char *interface, const struct pcap_pkthdr *pkthdr, const u_char 
     const u_char *dhcpMshType = packet + sizeof(struct ether_header) + sizeof(struct ipv6_header) + sizeof(struct udphdr);
     const uint8_t msgType = *dhcpMshType;
 
-    if (msgType == 1 || msgType == 3) {
+    if (msgType == 1 || msgType == 3 || msgType == 5 || msgType == 6 || msgType == 8 || msgType == 9 || msgType == 11) {
         char macAddrStr[20];
         sprintf(macAddrStr,"%02x:%02x:%02x:%02x:%02x:%02x", ethernet_header.ether_shost[0], ethernet_header.ether_shost[1],
                ethernet_header.ether_shost[2], ethernet_header.ether_shost[3], ethernet_header.ether_shost[OPTION_IA_TA], ethernet_header.ether_shost[OPTION_IAADDR]);
