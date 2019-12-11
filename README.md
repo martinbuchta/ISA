@@ -5,6 +5,10 @@ Autor: Martin Buchta (xbucht28)
 
 Projekt do ISA 2019/2020, VUT FIT.
 
+Hodnocení: 20/20
+
+Viz manual.pdf
+
 
 Zdroje
 ------
